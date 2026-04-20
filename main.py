@@ -1,23 +1,23 @@
+import os
 import requests
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 # ==================== 配置区 ====================
-WEWORK_WEBHOOK = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=fa2dde06-bf5e-499c-9aaa-548eb085cb24"
+WEWORK_WEBHOOK = os.environ.get('WEWORK_WEBHOOK')
+if not WEWORK_WEBHOOK:
+    raise Exception("❌ 环境变量 WEWORK_WEBHOOK 未设置！")
 
 LATITUDE = 36.389
 LONGITUDE = 120.447
 CITY_NAME = "青岛即墨区"
 
 FORECAST_HOURS = 6
-PROBABILITY_THRESHOLD = 50   # 降水概率阈值，可调整为 40、50、60
+PROBABILITY_THRESHOLD = 50
+TEST_MODE = True   # 测试时改为 True
 # ===============================================
 
 def get_beijing_time():
-    """获取当前北京时间（UTC+8）"""
-    # GitHub Actions 服务器是 UTC 时间，加 8 小时得到北京时间
-    utc_now = datetime.utcnow()
-    beijing_now = utc_now + timedelta(hours=8)
-    return beijing_now
+    return datetime.utcnow() + timedelta(hours=8)
 
 def get_current_weather_and_forecast():
     url = (
@@ -26,7 +26,7 @@ def get_current_weather_and_forecast():
         f"&current_weather=true"
         f"&hourly=weathercode,precipitation_probability"
         f"&daily=weathercode"
-        f"&timezone=Asia/Shanghai"          # API 返回北京时间
+        f"&timezone=Asia/Shanghai"
         f"&forecast_days=2"
     )
     try:
@@ -67,51 +67,75 @@ def send_wework_message(content):
         print(f"消息发送失败: {e}")
         return False
 
+def read_sent_flag(filename):
+    """读取缓存文件，返回上次发送的日期字符串，如果文件不存在返回空字符串"""
+    try:
+        with open(filename, 'r') as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return ""
+
+def write_sent_flag(filename, date_str):
+    """写入当前发送日期到缓存文件"""
+    with open(filename, 'w') as f:
+        f.write(date_str)
+
 def check_and_notify():
+    if TEST_MODE:
+        print("测试模式：发送模拟提醒")
+        title = "🌧️ 青岛即墨区 雨天提醒（测试）"
+        body = "⚠️ 今日有降雨，各部门注意将室外货物移入室内！"
+        weather_info = "📍 当前天气：晴（测试），22℃"
+        tip = "温馨提示：雨天路滑，注意出行安全~"
+        message = f"{title}\n\n{body}\n{weather_info}\n{tip}\n\n（测试消息，请确认能收到）"
+        send_wework_message(message)
+        return
+
     data = get_current_weather_and_forecast()
     if not data:
         send_wework_message("⚠️ 天气服务暂时无法访问，请稍后检查。")
         return
 
-    # 当前天气（API 返回的 current_weather 里的时间也是北京时间）
     current = data.get("current_weather", {})
     temp = current.get("temperature")
     weather_code = current.get("weathercode")
     current_desc = get_weather_description(weather_code) if weather_code is not None else "未知"
 
-    # 逐小时数据（时间字符串已经是北京时间）
     hourly = data.get("hourly", {})
     times = hourly.get("time", [])
     codes = hourly.get("weathercode", [])
     probs = hourly.get("precipitation_probability", [])
 
     now_beijing = get_beijing_time()
-    rain_hours_today = []
-    tomorrow_has_rain = False
+    today_str = now_beijing.strftime("%Y-%m-%d")
     tomorrow_str = (now_beijing + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    print(f"当前北京时间: {now_beijing}")
-    print(f"未来 {FORECAST_HOURS} 小时内的逐小时预报：")
+    # 读取已发送记录
+    sent_today = read_sent_flag("last_sent_today.txt")
+    sent_tomorrow = read_sent_flag("last_sent_tomorrow.txt")
 
+    # 检查今天未来6小时是否有雨
+    rain_hours_today = []
     for i, t_str in enumerate(times):
         if i >= len(codes) or i >= len(probs):
             continue
-        # 解析 API 返回的时间字符串（格式如 "2026-04-20T15:00"）
         t = datetime.fromisoformat(t_str)
-        # 只关注未来 FORECAST_HOURS 小时内
         if t >= now_beijing and t <= now_beijing + timedelta(hours=FORECAST_HOURS):
-            is_rain_flag = is_rain(codes[i])
-            prob = probs[i]
-            print(f"  {t_str}: 代码={codes[i]}, 降水概率={prob}%, 是否为雨={is_rain_flag}")
-            if is_rain_flag and prob >= PROBABILITY_THRESHOLD:
+            if is_rain(codes[i]) and probs[i] >= PROBABILITY_THRESHOLD:
                 rain_hours_today.append(t.strftime("%H:%M"))
-        # 检查明天是否有雨（全天任意小时）
+
+    # 检查明天是否有雨
+    tomorrow_has_rain = False
+    for i, t_str in enumerate(times):
+        if i >= len(codes) or i >= len(probs):
+            continue
         if t_str.startswith(tomorrow_str):
             if is_rain(codes[i]) and probs[i] >= PROBABILITY_THRESHOLD:
                 tomorrow_has_rain = True
+                break
 
-    # 发送消息
-    if rain_hours_today:
+    # 发送今日提醒（仅当今天有雨且今天还未发送过）
+    if rain_hours_today and sent_today != today_str:
         hour_list = "、".join(rain_hours_today)
         title = "🌧️ 青岛即墨区 雨天提醒"
         body = "⚠️ 今日有降雨，各部门注意将室外货物移入室内！"
@@ -119,15 +143,21 @@ def check_and_notify():
         tip = "温馨提示：雨天路滑，注意出行安全~"
         message = f"{title}\n\n{body}\n{weather_info}\n{tip}\n\n（预计未来{hour_list}左右降雨）"
         send_wework_message(message)
-    elif tomorrow_has_rain:
+        write_sent_flag("last_sent_today.txt", today_str)
+    elif not rain_hours_today:
+        print("未来6小时无高概率降雨")
+
+    # 发送明日提醒（仅当明天有雨且明天还未发送过）
+    if tomorrow_has_rain and sent_tomorrow != tomorrow_str:
         title = "🌧️ 青岛即墨区 雨天提醒"
         body = "⚠️ 明天有降雨，各部门请在下班前将室外货物移入室内！"
         weather_info = f"📍 当前天气：{current_desc}，{temp}℃"
         tip = "温馨提示：雨天路滑，注意出行安全~"
         message = f"{title}\n\n{body}\n{weather_info}\n{tip}"
         send_wework_message(message)
-    else:
-        print("未来一天无高概率降雨，无需提醒")
+        write_sent_flag("last_sent_tomorrow.txt", tomorrow_str)
+    elif not tomorrow_has_rain:
+        print("明天无高概率降雨")
 
 if __name__ == "__main__":
     check_and_notify()
