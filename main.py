@@ -1,5 +1,5 @@
 import requests
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 # ==================== 配置区 ====================
 WEWORK_WEBHOOK = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=fa2dde06-bf5e-499c-9aaa-548eb085cb24"
@@ -9,12 +9,13 @@ LONGITUDE = 120.447
 CITY_NAME = "青岛即墨区"
 
 FORECAST_HOURS = 6
-PROBABILITY_THRESHOLD = 50   # 降水概率阈值，可调整为 40、50、60
+PROBABILITY_THRESHOLD = 50   # 正常使用时的阈值
+
+# 测试开关：设置为 True 后，会强制发送一条测试消息，不依赖实际天气
+TEST_MODE = True   # 改为True 进行测试，测试完改回 False
 # ===============================================
 
 def get_beijing_time():
-    """获取当前北京时间（UTC+8）"""
-    # GitHub Actions 服务器是 UTC 时间，加 8 小时得到北京时间
     utc_now = datetime.utcnow()
     beijing_now = utc_now + timedelta(hours=8)
     return beijing_now
@@ -26,7 +27,7 @@ def get_current_weather_and_forecast():
         f"&current_weather=true"
         f"&hourly=weathercode,precipitation_probability"
         f"&daily=weathercode"
-        f"&timezone=Asia/Shanghai"          # API 返回北京时间
+        f"&timezone=Asia/Shanghai"
         f"&forecast_days=2"
     )
     try:
@@ -68,18 +69,28 @@ def send_wework_message(content):
         return False
 
 def check_and_notify():
+    # 测试模式：强制发送一条模拟消息
+    if TEST_MODE:
+        print("测试模式：发送模拟提醒")
+        title = "🌧️ 青岛即墨区 雨天提醒（测试）"
+        body = "⚠️ 今日有降雨，各部门注意将室外货物移入室内！"
+        weather_info = "📍 当前天气：晴（测试），22℃"
+        tip = "温馨提示：雨天路滑，注意出行安全~"
+        message = f"{title}\n\n{body}\n{weather_info}\n{tip}\n\n（测试消息，请确认能收到）"
+        send_wework_message(message)
+        return
+
+    # 正常模式：获取真实天气
     data = get_current_weather_and_forecast()
     if not data:
         send_wework_message("⚠️ 天气服务暂时无法访问，请稍后检查。")
         return
 
-    # 当前天气（API 返回的 current_weather 里的时间也是北京时间）
     current = data.get("current_weather", {})
     temp = current.get("temperature")
     weather_code = current.get("weathercode")
     current_desc = get_weather_description(weather_code) if weather_code is not None else "未知"
 
-    # 逐小时数据（时间字符串已经是北京时间）
     hourly = data.get("hourly", {})
     times = hourly.get("time", [])
     codes = hourly.get("weathercode", [])
@@ -96,21 +107,17 @@ def check_and_notify():
     for i, t_str in enumerate(times):
         if i >= len(codes) or i >= len(probs):
             continue
-        # 解析 API 返回的时间字符串（格式如 "2026-04-20T15:00"）
         t = datetime.fromisoformat(t_str)
-        # 只关注未来 FORECAST_HOURS 小时内
         if t >= now_beijing and t <= now_beijing + timedelta(hours=FORECAST_HOURS):
             is_rain_flag = is_rain(codes[i])
             prob = probs[i]
             print(f"  {t_str}: 代码={codes[i]}, 降水概率={prob}%, 是否为雨={is_rain_flag}")
             if is_rain_flag and prob >= PROBABILITY_THRESHOLD:
                 rain_hours_today.append(t.strftime("%H:%M"))
-        # 检查明天是否有雨（全天任意小时）
         if t_str.startswith(tomorrow_str):
             if is_rain(codes[i]) and probs[i] >= PROBABILITY_THRESHOLD:
                 tomorrow_has_rain = True
 
-    # 发送消息
     if rain_hours_today:
         hour_list = "、".join(rain_hours_today)
         title = "🌧️ 青岛即墨区 雨天提醒"
