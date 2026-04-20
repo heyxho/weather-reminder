@@ -13,7 +13,7 @@ CITY_NAME = "青岛即墨区"
 
 FORECAST_HOURS = 6
 PROBABILITY_THRESHOLD = 50
-TEST_MODE = True   # 测试时改为 True
+TEST_MODE = False   # 测试时改为 True
 # ===============================================
 
 def get_beijing_time():
