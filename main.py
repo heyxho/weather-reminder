@@ -63,17 +63,22 @@ def check_and_notify():
     today_str = datetime.now().strftime("%Y-%m-%d")
     tomorrow_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     
-    # 1. 检查今天是否有雨，并处理“今天”的提醒
+    # 临时添加：打印今天的天气代码，用于调试
     daily_data = weather_data.get("daily", {})
     daily_weathercodes = daily_data.get("weathercode", [])
     daily_times = daily_data.get("time", [])
     
-    today_has_rain = False
     for i, day_str in enumerate(daily_times):
         if day_str == today_str and i < len(daily_weathercodes):
-            if is_rain(daily_weathercodes[i]):
-                today_has_rain = True
-                break
+            code = daily_weathercodes[i]
+            print(f"【调试】今天的天气代码是: {code}")
+            # 根据代码判断是否在 rain_codes 中
+            if is_rain(code):
+                print(f"【调试】代码 {code} 被判定为有雨")
+            else:
+                print(f"【调试】代码 {code} 被判定为无雨")
+            break
+    # 后面的原代码保持不变，继续...
     
     # 如果今天有雨，且今天还没有发过提醒，就发送消息
     if today_has_rain and LAST_ALERT_DATE.get("today") != today_str:
