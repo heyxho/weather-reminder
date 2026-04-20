@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 # ==================== 配置区 ====================
 # 请替换为你的企业微信群机器人 Webhook 地址
-WEWORK_WEBHOOK = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的key"
+WEWORK_WEBHOOK = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=fa2dde06-bf5e-499c-9aaa-548eb085cb24"
 
 # 青岛即墨的坐标（高德坐标系，Open-Meteo 使用 WGS84，直接可用）
 LATITUDE = 36.389
