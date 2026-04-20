@@ -1,106 +1,156 @@
-import sys
 import requests
-import json
 from datetime import datetime, timedelta
 
-# 强制刷新输出，确保日志可见
-def debug_print(msg):
-    print(msg, flush=True)
-    sys.stderr.write(msg + "\n")
-    sys.stderr.flush()
-
 # ==================== 配置区 ====================
-WEWORK_WEBHOOK = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=fa2dde06-bf5e-499c-9aaa-548eb085cb24"
+# 请替换为你的企业微信群机器人 Webhook 地址
+WEWORK_WEBHOOK = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的key"
 
+# 青岛即墨的坐标（高德坐标系，Open-Meteo 使用 WGS84，直接可用）
 LATITUDE = 36.389
 LONGITUDE = 120.447
-CITY_NAME = "青岛即墨"
+CITY_NAME = "青岛即墨区"
 
-LAST_ALERT_DATE = {"today": "", "tomorrow": ""}
+# 未来多少小时内下雨算“即将下雨”
+FORECAST_HOURS = 6
+
+# 降水概率阈值（%），高于此值才认为会下雨（避免极小概率误报）
+PROBABILITY_THRESHOLD = 30
 # ===============================================
 
-def get_weather_forecast():
-    weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={LATITUDE}&longitude={LONGITUDE}&hourly=weathercode&daily=weathercode&timezone=Asia/Shanghai&forecast_days=3"
+def get_current_weather_and_forecast():
+    """
+    获取当前天气（温度、天气状况）和未来逐小时预报（含降水概率）
+    使用 Open-Meteo API
+    """
+    url = (
+        f"https://api.open-meteo.com/v1/forecast"
+        f"?latitude={LATITUDE}&longitude={LONGITUDE}"
+        f"&current_weather=true"
+        f"&hourly=weathercode,precipitation_probability"
+        f"&daily=weathercode"
+        f"&timezone=Asia/Shanghai"
+        f"&forecast_days=2"
+    )
     try:
-        response = requests.get(weather_url)
-        response.raise_for_status()
-        return response.json()
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
     except Exception as e:
-        debug_print(f"获取天气数据失败: {e}")
+        print(f"获取天气数据失败: {e}")
         return None
 
 def is_rain(weathercode):
+    """判断天气代码是否表示任何形式的雨（包括小雨、中雨、大雨、毛毛雨、阵雨、雷暴）"""
     rain_codes = set(range(51, 58)) | set(range(61, 68)) | set(range(80, 83)) | {95, 96, 99}
     return weathercode in rain_codes
 
+def get_weather_description(code):
+    """将天气代码转为中文描述（仅用于当前天气）"""
+    # 参考：https://open-meteo.com/en/docs
+    weather_map = {
+        0: "晴",
+        1: "晴",
+        2: "局部多云",
+        3: "阴",
+        45: "雾",
+        48: "雾",
+        51: "毛毛雨",
+        53: "毛毛雨",
+        55: "毛毛雨",
+        56: "冻毛毛雨",
+        57: "冻毛毛雨",
+        61: "小雨",
+        63: "中雨",
+        65: "大雨",
+        66: "冻雨",
+        67: "强冻雨",
+        71: "小雪",
+        73: "中雪",
+        75: "大雪",
+        77: "雪粒",
+        80: "阵雨",
+        81: "强阵雨",
+        82: "大阵雨",
+        85: "阵雪",
+        86: "强阵雪",
+        95: "雷暴",
+        96: "雷暴伴小冰雹",
+        99: "雷暴伴大冰雹",
+    }
+    return weather_map.get(code, "未知")
+
 def send_wework_message(content):
+    """发送消息到企业微信群"""
     headers = {"Content-Type": "application/json"}
     payload = {
         "msgtype": "text",
-        "text": {"content": content}
+        "text": {
+            "content": content,
+            # "mentioned_list": ["@all"]   # 如需@所有人，取消注释
+        }
     }
     try:
-        resp = requests.post(WEWORK_WEBHOOK, json=payload, headers=headers)
-        debug_print(f"消息发送结果: {resp.text}")
+        resp = requests.post(WEWORK_WEBHOOK, json=payload, headers=headers, timeout=10)
+        print(f"消息发送结果: {resp.text}")
+        return resp.status_code == 200
     except Exception as e:
-        debug_print(f"消息发送失败: {e}")
+        print(f"消息发送失败: {e}")
+        return False
 
 def check_and_notify():
-    debug_print("========== 调试信息开始 ==========")
-    weather_data = get_weather_forecast()
-    if not weather_data:
-        debug_print("无法获取天气数据")
+    data = get_current_weather_and_forecast()
+    if not data:
+        send_wework_message("⚠️ 天气服务暂时无法访问，请稍后检查。")
         return
 
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    tomorrow_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-    
-    daily_data = weather_data.get("daily", {})
-    daily_weathercodes = daily_data.get("weathercode", [])
-    daily_times = daily_data.get("time", [])
-    
-    debug_print(f"今天的日期: {today_str}")
-    debug_print(f"明天的日期: {tomorrow_str}")
-    debug_print(f"API返回的每日时间列表: {daily_times}")
-    debug_print(f"API返回的每日天气代码列表: {daily_weathercodes}")
-    
-    for i, day_str in enumerate(daily_times):
-        if i >= len(daily_weathercodes):
-            break
-        code = daily_weathercodes[i]
-        rain_flag = is_rain(code)
-        debug_print(f"日期 {day_str} -> 天气代码 {code} -> 是否有雨: {rain_flag}")
-    
-    debug_print("========== 调试信息结束 ==========")
-    
-    # 以下为原有的发送逻辑
-    today_has_rain = False
-    for i, day_str in enumerate(daily_times):
-        if day_str == today_str and i < len(daily_weathercodes):
-            if is_rain(daily_weathercodes[i]):
-                today_has_rain = True
-            break
-    
+    # 1. 获取当前天气
+    current = data.get("current_weather", {})
+    temp = current.get("temperature")
+    weather_code = current.get("weathercode")
+    current_desc = get_weather_description(weather_code) if weather_code is not None else "未知"
+
+    # 2. 获取逐小时数据
+    hourly = data.get("hourly", {})
+    times = hourly.get("time", [])
+    codes = hourly.get("weathercode", [])
+    probs = hourly.get("precipitation_probability", [])
+
+    now = datetime.now()
+    rain_hours_today = []
     tomorrow_has_rain = False
-    for i, day_str in enumerate(daily_times):
-        if day_str == tomorrow_str and i < len(daily_weathercodes):
-            if is_rain(daily_weathercodes[i]):
+    tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    for i, t_str in enumerate(times):
+        if i >= len(codes) or i >= len(probs):
+            continue
+        t = datetime.fromisoformat(t_str)
+        # 未来 FORECAST_HOURS 小时内的降雨（今日）
+        if t >= now and t <= now + timedelta(hours=FORECAST_HOURS):
+            if is_rain(codes[i]) and probs[i] >= PROBABILITY_THRESHOLD:
+                rain_hours_today.append(t.strftime("%H:%M"))
+        # 检查明天是否有雨
+        if t_str.startswith(tomorrow_str):
+            if is_rain(codes[i]) and probs[i] >= PROBABILITY_THRESHOLD:
                 tomorrow_has_rain = True
-            break
-    
-    if today_has_rain and LAST_ALERT_DATE.get("today") != today_str:
-        msg = f"🌧️ {CITY_NAME}今天整体预报有雨，请及时将室外货物移至室内！"
-        send_wework_message(msg)
-        LAST_ALERT_DATE["today"] = today_str
+
+    # 3. 准备消息内容
+    if rain_hours_today:
+        hour_list = "、".join(rain_hours_today)
+        title = "🌧️ 青岛即墨区 雨天提醒"
+        body = "⚠️ 今日有降雨，各部门注意将室外货物移入室内！"
+        weather_info = f"📍 当前天气：{current_desc}，{temp}℃"
+        tip = "温馨提示：雨天路滑，注意出行安全~"
+        message = f"{title}\n\n{body}\n{weather_info}\n{tip}\n\n（预计未来{hour_list}左右降雨）"
+        send_wework_message(message)
+    elif tomorrow_has_rain:
+        title = "🌧️ 青岛即墨区 雨天提醒"
+        body = "⚠️ 明天有降雨，各部门请在下班前将室外货物移入室内！"
+        weather_info = f"📍 当前天气：{current_desc}，{temp}℃"
+        tip = "温馨提示：雨天路滑，注意出行安全~"
+        message = f"{title}\n\n{body}\n{weather_info}\n{tip}"
+        send_wework_message(message)
     else:
-        debug_print("今天无雨或已提醒过，不发送今日提醒")
-    
-    if tomorrow_has_rain and LAST_ALERT_DATE.get("tomorrow") != tomorrow_str:
-        msg = f"🌙 {CITY_NAME}明天预报有雨，请在下班前将室外货物移至室内！"
-        send_wework_message(msg)
-        LAST_ALERT_DATE["tomorrow"] = tomorrow_str
-    else:
-        debug_print("明天无雨或已提醒过，不发送明日提醒")
+        print("未来一天无高概率降雨，无需提醒")
 
 if __name__ == "__main__":
     check_and_notify()
