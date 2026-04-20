@@ -10,7 +10,7 @@ def debug_print(msg):
     sys.stderr.flush()
 
 # ==================== 配置区 ====================
-WEWORK_WEBHOOK = "这里替换为你的群机器人Webhook地址"
+WEWORK_WEBHOOK = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=fa2dde06-bf5e-499c-9aaa-548eb085cb24"
 
 LATITUDE = 36.389
 LONGITUDE = 120.447
