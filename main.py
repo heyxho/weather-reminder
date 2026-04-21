@@ -11,20 +11,20 @@ LATITUDE = 36.389
 LONGITUDE = 120.447
 CITY_NAME = "青岛即墨区"
 
-FORECAST_HOURS = 6
-PROBABILITY_THRESHOLD = 50
-TEST_MODE = False   # 测试时改为 True
+FORECAST_HOURS = 6          # 未来几小时内降雨提醒
+TEST_MODE = False            # 测试模式
 # ===============================================
 
 def get_beijing_time():
     return datetime.utcnow() + timedelta(hours=8)
 
 def get_current_weather_and_forecast():
+    # 添加 precipitation 字段获取累计降雨量
     url = (
         f"https://api.open-meteo.com/v1/forecast"
         f"?latitude={LATITUDE}&longitude={LONGITUDE}"
         f"&current_weather=true"
-        f"&hourly=weathercode,precipitation_probability"
+        f"&hourly=weathercode,precipitation"
         f"&daily=weathercode"
         f"&timezone=Asia/Shanghai"
         f"&forecast_days=2"
@@ -38,6 +38,7 @@ def get_current_weather_and_forecast():
         return None
 
 def is_rain(weathercode):
+    """判断天气代码是否表示任何形式的雨"""
     rain_codes = set(range(51, 58)) | set(range(61, 68)) | set(range(80, 83)) | {95, 96, 99}
     return weathercode in rain_codes
 
@@ -68,7 +69,6 @@ def send_wework_message(content):
         return False
 
 def read_sent_flag(filename):
-    """读取缓存文件，返回上次发送的日期字符串，如果文件不存在返回空字符串"""
     try:
         with open(filename, 'r') as f:
             return f.read().strip()
@@ -76,7 +76,6 @@ def read_sent_flag(filename):
         return ""
 
 def write_sent_flag(filename, date_str):
-    """写入当前发送日期到缓存文件"""
     with open(filename, 'w') as f:
         f.write(date_str)
 
@@ -104,37 +103,38 @@ def check_and_notify():
     hourly = data.get("hourly", {})
     times = hourly.get("time", [])
     codes = hourly.get("weathercode", [])
-    probs = hourly.get("precipitation_probability", [])
+    # 获取降水量数组（单位 mm）
+    precipitations = hourly.get("precipitation", [])
 
     now_beijing = get_beijing_time()
     today_str = now_beijing.strftime("%Y-%m-%d")
     tomorrow_str = (now_beijing + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # 读取已发送记录
     sent_today = read_sent_flag("last_sent_today.txt")
     sent_tomorrow = read_sent_flag("last_sent_tomorrow.txt")
 
-    # 检查今天未来6小时是否有雨
+    # 检查今天未来 FORECAST_HOURS 小时内是否有雨（降水量 > 0 且天气代码为雨）
     rain_hours_today = []
     for i, t_str in enumerate(times):
-        if i >= len(codes) or i >= len(probs):
+        if i >= len(codes) or i >= len(precipitations):
             continue
         t = datetime.fromisoformat(t_str)
         if t >= now_beijing and t <= now_beijing + timedelta(hours=FORECAST_HOURS):
-            if is_rain(codes[i]) and probs[i] >= PROBABILITY_THRESHOLD:
+            # 关键改动：降水量 > 0 且是雨
+            if is_rain(codes[i]) and precipitations[i] > 0:
                 rain_hours_today.append(t.strftime("%H:%M"))
 
-    # 检查明天是否有雨
+    # 检查明天是否有雨（全天任意小时降水量 > 0 且天气代码为雨）
     tomorrow_has_rain = False
     for i, t_str in enumerate(times):
-        if i >= len(codes) or i >= len(probs):
+        if i >= len(codes) or i >= len(precipitations):
             continue
         if t_str.startswith(tomorrow_str):
-            if is_rain(codes[i]) and probs[i] >= PROBABILITY_THRESHOLD:
+            if is_rain(codes[i]) and precipitations[i] > 0:
                 tomorrow_has_rain = True
                 break
 
-    # 发送今日提醒（仅当今天有雨且今天还未发送过）
+    # 发送今日提醒
     if rain_hours_today and sent_today != today_str:
         hour_list = "、".join(rain_hours_today)
         title = "🌧️ 青岛即墨区 雨天提醒"
@@ -145,9 +145,9 @@ def check_and_notify():
         send_wework_message(message)
         write_sent_flag("last_sent_today.txt", today_str)
     elif not rain_hours_today:
-        print("未来6小时无高概率降雨")
+        print("未来6小时无降雨（降水量为0）")
 
-    # 发送明日提醒（仅当明天有雨且明天还未发送过）
+    # 发送明日提醒
     if tomorrow_has_rain and sent_tomorrow != tomorrow_str:
         title = "🌧️ 青岛即墨区 雨天提醒"
         body = "⚠️ 明天有降雨，各部门请在下班前将室外货物移入室内！"
@@ -157,7 +157,7 @@ def check_and_notify():
         send_wework_message(message)
         write_sent_flag("last_sent_tomorrow.txt", tomorrow_str)
     elif not tomorrow_has_rain:
-        print("明天无高概率降雨")
+        print("明天无降雨（降水量为0）")
 
 if __name__ == "__main__":
     check_and_notify()
