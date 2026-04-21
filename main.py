@@ -146,7 +146,7 @@ def check_and_notify():
     if rain_hours_today and sent_today != today_str:
         hour_list = "、".join(rain_hours_today)
         title = "🌧️ 青岛即墨区 雨天提醒"
-        body = "⚠️ 今日有降雨，各部门注意将室外货物移入室内！"
+        body = "⚠️ 未来24小时有降雨，各部门注意将室外货物移入室内！"
         weather_info = f"📍 当前天气：{current_desc}，{temp}℃"
         tip = "温馨提示：雨天路滑，注意出行安全~"
         message = f"{title}\n\n{body}\n{weather_info}\n{tip}\n\n（预计未来{hour_list}左右降雨）"
