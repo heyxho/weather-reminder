@@ -2,9 +2,9 @@ name: 定时发送天气提醒
 
 on:
   schedule:
-    - cron: '30 1 * * *'
-    - cron: '30 6 * * *'
-    - cron: '0 9 * * *'
+    - cron: '30 1 * * *'   # 北京时间 9:30
+    - cron: '30 6 * * *'   # 北京时间 14:30
+    - cron: '0 9 * * *'    # 北京时间 17:00
   workflow_dispatch:
 
 jobs:
@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: 恢复缓存
+      - name: 恢复缓存（去重记录）
         uses: actions/cache@v3
         with:
           path: |
