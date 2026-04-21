@@ -12,7 +12,7 @@ LONGITUDE = 120.447
 CITY_NAME = "青岛即墨区"
 
 FORECAST_HOURS = 6          # 未来几小时提醒
-TEST_MODE = True            # 测试模式改为 True 发送测试消息
+TEST_MODE = False            # 测试模式改为 True 发送测试消息
 # ===============================================
 
 def get_beijing_time():
