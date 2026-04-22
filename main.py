@@ -87,12 +87,6 @@ def write_sent_flag(filename, date_str):
         f.write(date_str)
 
 def check_and_notify():
-    def check_and_notify():
-    # 临时清除缓存（运行一次后请删除这几行）
-        import os
-        for f in ["last_sent_today.txt", "last_sent_tomorrow.txt"]:
-            try: os.remove(f); print(f"已删除 {f}")
-            except FileNotFoundError: pass
     # 以下是原有代码...
     if TEST_MODE:
         print("测试模式：发送模拟提醒")
