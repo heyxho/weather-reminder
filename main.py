@@ -1,5 +1,6 @@
 import os
 import requests
+import time
 from datetime import datetime, timedelta
 
 # ==================== 配置区 ====================
@@ -20,7 +21,7 @@ def get_beijing_time():
     return datetime.utcnow() + timedelta(hours=8)
 
 def get_current_weather_and_forecast():
-    """获取实时天气和逐小时预报（含降水量）"""
+    """获取实时天气和逐小时预报（含降水量），自动重试2次"""
     url = (
         f"https://api.open-meteo.com/v1/forecast"
         f"?latitude={LATITUDE}&longitude={LONGITUDE}"
@@ -29,13 +30,18 @@ def get_current_weather_and_forecast():
         f"&timezone=Asia/Shanghai"
         f"&forecast_days=2"
     )
-    try:
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        print(f"获取天气数据失败: {e}")
-        return None
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        try:
+            resp = requests.get(url, timeout=15)   # 超时15秒
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            print(f"获取天气数据失败 (尝试 {attempt+1}/{max_retries+1}): {e}")
+            if attempt == max_retries:
+                return None
+            time.sleep(2)   # 重试前等待2秒
+    return None
 
 def is_rain(weathercode):
     """判断天气代码是否表示雨（包括毛毛雨、小雨、中雨、大雨、阵雨、雷暴）"""
@@ -100,7 +106,8 @@ def check_and_notify():
 
     data = get_current_weather_and_forecast()
     if not data:
-        send_wework_message("⚠️ 天气服务暂时无法访问，请稍后检查。")
+        # 不再发送群消息，只打印日志
+        print("⚠️ 天气服务暂时无法访问，本次跳过发送")
         return
 
     # 当前天气
